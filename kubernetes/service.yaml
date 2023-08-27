@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: file-upload-service
+spec:
+  selector:
+    app: file-upload-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 5000
+  type: LoadBalancer
