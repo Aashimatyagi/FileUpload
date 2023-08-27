@@ -14,6 +14,6 @@ spec:
     spec:
       containers:
       - name: file-upload-container
-        image: aashimatyagi/file-upload-image:__TAG__
+        image: aashimatyagi/file-upload:__TAG__
         ports:
         - containerPort: 5000
