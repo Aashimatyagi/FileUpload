@@ -1,114 +1,85 @@
-from flask import Flask, request, jsonify, send_from_directory, render_template
-import os
+from flask import Flask, request, render_template, jsonify, send_file
 from werkzeug.utils import secure_filename
-import datetime
+from PyPDF2 import PdfReader
 from PIL import Image
-import magic
+import os
+from datetime import datetime
 
 app = Flask(__name__)
 
-# Configuration
 UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'csv', 'xlsx', 'docx'}
-
+ALLOWED_EXTENSIONS = set(
+    ['txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'csv', 'xlsx', 'docx'])
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-# Utility functions
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def get_file_description(file_path):
-    try:
-        magic_obj = magic.Magic()
-        file_type = magic_obj.from_file(file_path)
-        return file_type
-    except Exception as e:
-        return str(e)
 
-# Routes
-
-@app.route('/')
-def main():
+@app.route('/', methods=['GET'])
+def index():
     return render_template('index.html')
 
-@app.route('/files', methods=['GET'])
-def get_files_info():
-    return jsonify(uploaded_files)
-
-
-@app.route('/get_image_metadata/<filename>', methods=['GET'])
-def get_image_metadata(filename):
-    try:
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        image = Image.open(file_path)
-        width, height = image.size
-        format_name = image.format       
-        exif_data = None
-        if hasattr(image, '_getexif'):
-            exif_data = image._getexif()
-
-        return jsonify({
-            'width': width,
-            'height': height,
-            'format': format_name,
-            'exif_data': exif_data})
-
-    except Exception as e:
-        return jsonify({'error': str(e)})
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    if 'files' not in request.files:
-        resp = jsonify({'message': 'No file part in the request'})
-        resp.status_code = 400
-        return resp
+    if 'file' not in request.files:
+        return jsonify(error='No file part'), 400
 
-    files = request.files.getlist('files')
+    file = request.files['file']
 
-    errors = {}
-    success = False
+    if file.filename == '':
+        return jsonify(error='No selected file'), 400
 
-    for file in files:
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
 
-            file_description = get_file_description(file_path)
+        metadata = extract_metadata(filepath)
+        os.remove(filepath)
 
-            file_info = {
-                'filename': file.filename,
-                'size': os.path.getsize(file_path),
-                'url': f'/uploads/{filename}',
-                'upload_date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'description': file_description
+        return jsonify(metadata)
+
+    return jsonify(error='File upload failed. Invalid file type or extension.'), 400
+
+
+def extract_metadata(filepath):
+    metadata = {}
+
+    if filepath.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+        try:
+            image = Image.open(filepath)
+            image_metadata = image._getexif()
+            metadata['file_type'] = 'Image'
+            metadata['image'] = image_metadata
+        except:
+            pass
+
+    if filepath.lower().endswith('.pdf'):
+        try:
+            pdf = PdfReader(filepath)
+            metadata['file_type'] = 'PDF'
+            metadata['pdf'] = {
+                'num_pages': len(pdf.pages),
+                'info': pdf.info
             }
+        except:
+            pass
 
-            uploaded_files.append(file_info)
-            success = True
-        else:
-            errors[file.filename] = 'File type is not allowed'
+    # Additional information
+    filename = os.path.basename(filepath)
+    file_extension = filename.rsplit('.', 1)[-1].lower()
+    file_type = metadata.get('file_type', 'Unknown File Type')
+    metadata['filename'] = filename
+    metadata['size'] = os.path.getsize(filepath)
+    # metadata['url'] = f'/download/{filename}'
+    metadata['description'] = f'{file_type}/{file_extension}'
+    metadata['upload_date'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    if success and errors:
-        errors['message'] = 'File(s) successfully uploaded'
-        resp = jsonify(errors)
-        resp.status_code = 500
-        return resp
-    if success:
-        resp = jsonify({'message': 'Files successfully uploaded'})
-        resp.status_code = 201
-        return resp
-    else:
-        resp = jsonify(errors)
-        resp.status_code = 500
-        return resp
+    return metadata
 
-@app.route('/uploads/<filename>', methods=['GET'])
-def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 if __name__ == '__main__':
-    uploaded_files = []
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True)

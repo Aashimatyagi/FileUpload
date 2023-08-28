@@ -1,6 +1,12 @@
 Flask
 Pillow
 python-magic
+python-docx
+mutagen
+Werkzeug
+PyPDF2
+
+
 
 
 
